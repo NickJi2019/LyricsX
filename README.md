@@ -86,9 +86,18 @@ the Electronic Dictionary Research and Development Group, under
 LyricsX bundles the [licence statement](LyricsX/Supporting%20Files/KANJIDIC2-LICENSE.html)
 and [source format documentation](LyricsX/Supporting%20Files/KANJIDIC2-Format.html).
 The subset retains explicit kun readings with okurigana and applies reciprocal encoded variants.
-To refresh the snapshot before releases, download the latest
-[`kanjidic2.xml.gz`](https://www.edrdg.org/kanjidic/kanjidic2.xml.gz) and run
-`python3 Scripts/update-japanese-readings.py kanjidic2.xml.gz`.
+For ambiguous readings, it includes word-and-reading ranks adapted from the
+[Jiten Global Frequency Dictionary](https://jiten.moe/frequency-dictionaries)
+(Jiten, [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)).
+A lower rank is more frequent in that corpus. Ranks use the exact spelling when present
+and an explicitly linked reciprocal variant otherwise. A unique best-ranked reading is
+selected for ambiguous matches. A tied best rank or a wholly unranked match remains unresolved.
+
+To refresh the snapshot before releases, download
+[`kanjidic2.xml.gz`](https://www.edrdg.org/kanjidic/kanjidic2.xml.gz) and the
+[Jiten Global CSV](https://api.jiten.moe/api/frequency-list/download?downloadType=csv)
+(as `jiten-global.csv`), then run
+`python3 Scripts/update-japanese-readings.py kanjidic2.xml.gz jiten-global.csv`.
 
 #### Special Thanks
 

@@ -74,14 +74,22 @@ struct JapaneseOkuriganaReadings {
         return Self(contents ?? "")
     }()
 
-    private let forms: [Character: [String: Set<String>]]
+    private struct Candidate {
+        let stem: String
+        let frequencyRank: Int?
+    }
+
+    private let forms: [Character: [String: [Candidate]]]
 
     init(_ contents: String) {
-        var forms: [Character: [String: Set<String>]] = [:]
+        var forms: [Character: [String: [Candidate]]] = [:]
         for line in contents.split(separator: "\n") {
             let columns = line.split(separator: "\t")
-            guard columns.count == 3, columns[0].count == 1, let glyph = columns[0].first else { continue }
-            forms[glyph, default: [:]][String(columns[1]), default: []].insert(String(columns[2]))
+            guard (3 ... 4).contains(columns.count), columns[0].count == 1,
+                  let glyph = columns[0].first else { continue }
+            let rank = columns.count == 4 ? Int(columns[3]).flatMap { $0 > 0 ? $0 : nil } : nil
+            let candidate = Candidate(stem: String(columns[2]), frequencyRank: rank)
+            forms[glyph, default: [:]][String(columns[1]), default: []].append(candidate)
         }
         self.forms = forms
     }
@@ -97,10 +105,13 @@ struct JapaneseOkuriganaReadings {
         var suffix = normalizedKana(suffix)
         var cursor = index
         var readings: Set<String> = []
+        var ranks: [String: Int] = [:]
         while candidates.keys.contains(where: { $0.hasPrefix(suffix) }) {
-            if let stems = candidates[suffix] {
-                readings.formUnion(stems)
-                if readings.count > 1 { return nil }
+            for candidate in candidates[suffix] ?? [] {
+                readings.insert(candidate.stem)
+                if let rank = candidate.frequencyRank {
+                    ranks[candidate.stem] = min(rank, ranks[candidate.stem] ?? rank)
+                }
             }
             guard cursor + 1 < tokens.count else { break }
             let next = tokens[cursor + 1]
@@ -109,7 +120,12 @@ struct JapaneseOkuriganaReadings {
             suffix += normalizedKana(next.text)
             cursor += 1
         }
-        return readings.first
+        if readings.count == 1 { return readings.first }
+        // An ordinal corpus rank resolves ambiguity only when there is a
+        // unique best ranked reading. Unranked forms are not assigned a score.
+        guard let bestRank = ranks.values.min() else { return nil }
+        let bestReadings = ranks.filter { $0.value == bestRank }
+        return bestReadings.count == 1 ? bestReadings.keys.first : nil
     }
 }
 
