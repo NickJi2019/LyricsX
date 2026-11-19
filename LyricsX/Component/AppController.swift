@@ -30,6 +30,9 @@ final class AppController: NSObject {
 
     @Published var currentLyrics: Lyrics? {
         willSet {
+            // Candidates may have been loaded before the filtering settings
+            // changed. Apply the current rules on every adoption as well.
+            newValue?.filtrate()
             willChangeValue(forKey: "lyricsOffset")
             currentLineIndex = nil
         }
@@ -149,6 +152,17 @@ final class AppController: NSObject {
             .receive(on: DispatchQueue.lyricsDisplay)
             .sink { [weak self] in
                 self?.scheduleCurrentLineCheck()
+            }
+            .store(in: &cancelBag)
+
+        defaults.publisher(for: [.lyricsFilterKeys, .lyricsFilterEnabled])
+            .signal()
+            .receive(on: DispatchQueue.lyricsDisplay)
+            .sink { [weak self] in
+                guard let self = self, let lyrics = self.currentLyrics else { return }
+                // Re-publish without reloading/searching or replacing the lyrics.
+                // The setter re-filters, reselects the line and refreshes consumers.
+                self.currentLyrics = lyrics
             }
             .store(in: &cancelBag)
 

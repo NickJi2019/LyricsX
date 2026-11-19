@@ -245,14 +245,9 @@ extension Lyrics {
 
 extension NSPredicate {
     fileprivate static var lyricsPredicate: NSPredicate {
-        _ = NSPredicate.observer
-        return _lyricsPredicate
-    }
-
-    private static var _lyricsPredicate: NSPredicate!
-
-    private static let observer = defaults.observe(.lyricsFilterKeys, options: [.new, .initial]) { _, change in
-        let predicates = change.newValue.compactMap { (key: String) -> NSPredicate? in
+        // Build from the current settings on the caller's queue. A cached KVO
+        // predicate can race the queued refresh of the lyrics already on screen.
+        let predicates = defaults[.lyricsFilterKeys].compactMap { (key: String) -> NSPredicate? in
             let isRegex = key.hasPrefix("/")
             let pattern = isRegex ? String(key.dropFirst()) : key
             let options: NSRegularExpression.Options = isRegex ? [] : [.ignoreMetacharacters]
@@ -262,13 +257,41 @@ extension NSPredicate {
                 return !regex.isMatch(object.content)
             }
         }
-        _lyricsPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
+        return NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
     }
 }
 
 extension Lyrics {
+    private struct FilteredLine {
+        let index: Int
+        let position: TimeInterval
+        let content: String
+    }
+
+    private static let filteredLinesKey = Metadata.Key("com.JH.LyricsX.filteredLines")
+
     func filtrate() {
-        filtrate(isIncluded: NSPredicate.lyricsPredicate)
+        // Undo only this filter's previous decisions. Other disabled lines stay
+        // disabled, and edits/reordering must not re-enable an unrelated line.
+        let previouslyFiltered = metadata.data[Self.filteredLinesKey] as? [FilteredLine] ?? []
+        for line in previouslyFiltered where lines.indices.contains(line.index) {
+            if lines[line.index].position == line.position,
+               lines[line.index].content == line.content {
+                lines[line.index].enabled = true
+            }
+        }
+        metadata.data.removeValue(forKey: Self.filteredLinesKey)
+        guard defaults[.lyricsFilterEnabled] else { return }
+
+        let predicate = NSPredicate.lyricsPredicate
+        var filtered: [FilteredLine] = []
+        for index in lines.indices where lines[index].enabled {
+            if !predicate.evaluate(with: lines[index]) {
+                filtered.append(FilteredLine(index: index, position: lines[index].position, content: lines[index].content))
+                lines[index].enabled = false
+            }
+        }
+        metadata.data[Self.filteredLinesKey] = filtered
     }
 }
 
