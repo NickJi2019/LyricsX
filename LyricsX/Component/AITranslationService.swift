@@ -1,208 +1,5 @@
 import Foundation
-import LocalAuthentication
 import LyricsXFoundation
-import Security
-
-enum AILyricsTranslationCredentialError: Error {
-    case keychain(OSStatus)
-    case invalidStoredValue
-
-    var isTransient: Bool {
-        guard case let .keychain(status) = self else {
-            return false
-        }
-        return [
-            errSecInteractionNotAllowed,
-            errSecNotAvailable,
-        ].contains(status)
-    }
-}
-
-enum AILyricsTranslationCredentialStore {
-    private struct StoredCredential: Codable {
-        let version: Int
-        let endpointOrigin: String
-        let apiKey: String
-    }
-
-    private static let account = "api-key-v2"
-    private static let legacyAccount = "api-key"
-    private static let cacheLock = NSLock()
-    private static var cachedCredential: StoredCredential?
-
-    private static var service: String {
-        return "\(Bundle.main.bundleIdentifier ?? "com.JH.LyricsX").ai-lyrics-translation"
-    }
-
-    static func apiKey(
-        for endpoint: URL,
-        allowingAuthenticationUI: Bool = false
-    ) throws -> String? {
-        return try readAPIKey(
-            for: endpoint,
-            allowingAuthenticationUI: allowingAuthenticationUI,
-            useCache: true
-        )
-    }
-
-    private static func readAPIKey(
-        for endpoint: URL,
-        allowingAuthenticationUI: Bool,
-        useCache: Bool
-    ) throws -> String? {
-        guard let endpointOrigin = AILyricsTranslationPolicy.endpointOrigin(endpoint) else {
-            throw AILyricsTranslationCredentialError.invalidStoredValue
-        }
-        if useCache,
-           let cachedCredential = cachedCredentialValue(),
-           cachedCredential.endpointOrigin == endpointOrigin {
-            return cachedCredential.apiKey
-        }
-
-        var result: CFTypeRef?
-        let authenticationContext = LAContext()
-        authenticationContext.interactionNotAllowed = !allowingAuthenticationUI
-        let status = SecItemCopyMatching([
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecReturnData as String: true,
-            // Background translation passes `false` and therefore never surprises
-            // the user with an authentication sheet after a signer or ACL change.
-            kSecUseAuthenticationContext as String: authenticationContext,
-        ] as CFDictionary, &result)
-
-        if status == errSecItemNotFound {
-            return nil
-        }
-        guard status == errSecSuccess else {
-            throw AILyricsTranslationCredentialError.keychain(status)
-        }
-        guard let data = result as? Data,
-              let storedCredential = try? JSONDecoder().decode(StoredCredential.self, from: data),
-              storedCredential.version == 1 else {
-            throw AILyricsTranslationCredentialError.invalidStoredValue
-        }
-        guard storedCredential.endpointOrigin == endpointOrigin else {
-            return nil
-        }
-        let apiKey = try validatedAPIKey(storedCredential.apiKey)
-        let validatedCredential = StoredCredential(
-            version: 1,
-            endpointOrigin: endpointOrigin,
-            apiKey: apiKey
-        )
-        cacheCredential(validatedCredential)
-        return apiKey
-    }
-
-    /// Whether a key is stored for this endpoint's origin, without disclosing
-    /// it. The cache is deliberately bypassed: the point of asking is to tell
-    /// the user what the Keychain actually holds, so a key removed out of band
-    /// must not keep reporting as present for the rest of the session.
-    static func hasAccessibleAPIKey(
-        for endpoint: URL,
-        allowingAuthenticationUI: Bool = false
-    ) throws -> Bool {
-        return try readAPIKey(
-            for: endpoint,
-            allowingAuthenticationUI: allowingAuthenticationUI,
-            useCache: false
-        ) != nil
-    }
-
-    static func store(apiKey: String, for endpoint: URL) throws {
-        let apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !apiKey.isEmpty else {
-            try removeAPIKey()
-            return
-        }
-        let validatedAPIKey = try validatedAPIKey(apiKey)
-        guard let endpointOrigin = AILyricsTranslationPolicy.endpointOrigin(endpoint) else {
-            throw AILyricsTranslationCredentialError.invalidStoredValue
-        }
-        let storedCredential = StoredCredential(
-            version: 1,
-            endpointOrigin: endpointOrigin,
-            apiKey: validatedAPIKey
-        )
-        guard let credentialData = try? JSONEncoder().encode(storedCredential) else {
-            throw AILyricsTranslationCredentialError.invalidStoredValue
-        }
-
-        let query = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ] as CFDictionary
-        let attributes = [kSecValueData as String: credentialData] as CFDictionary
-        let updateStatus = SecItemUpdate(query, attributes)
-        if updateStatus == errSecSuccess {
-            cacheCredential(storedCredential)
-            return
-        }
-        guard updateStatus == errSecItemNotFound else {
-            throw AILyricsTranslationCredentialError.keychain(updateStatus)
-        }
-
-        let addStatus = SecItemAdd([
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-            kSecValueData as String: credentialData,
-        ] as CFDictionary, nil)
-        guard addStatus == errSecSuccess else {
-            throw AILyricsTranslationCredentialError.keychain(addStatus)
-        }
-        cacheCredential(storedCredential)
-    }
-
-    static func removeAPIKey() throws {
-        cacheCredential(nil)
-        var firstError: OSStatus?
-        for account in [account, legacyAccount] {
-            let status = SecItemDelete([
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: service,
-                kSecAttrAccount as String: account,
-            ] as CFDictionary)
-            if status != errSecSuccess,
-               status != errSecItemNotFound,
-               firstError == nil {
-                firstError = status
-            }
-        }
-        if let firstError {
-            throw AILyricsTranslationCredentialError.keychain(firstError)
-        }
-    }
-
-    static func validatedAPIKey(_ value: String) throws -> String {
-        let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty,
-              value.utf8.count <= 16_384,
-              !value.unicodeScalars.contains(where: {
-                  CharacterSet.newlines.contains($0) || CharacterSet.controlCharacters.contains($0)
-              }) else {
-            throw AILyricsTranslationCredentialError.invalidStoredValue
-        }
-        return value
-    }
-
-    private static func cachedCredentialValue() -> StoredCredential? {
-        cacheLock.lock()
-        defer { cacheLock.unlock() }
-        return cachedCredential
-    }
-
-    private static func cacheCredential(_ value: StoredCredential?) {
-        cacheLock.lock()
-        cachedCredential = value
-        cacheLock.unlock()
-    }
-}
 
 enum OpenAICompatibleLyricsTranslatorError: Error {
     case invalidResponse
@@ -226,8 +23,6 @@ struct AILyricsTranslationResult {
 }
 
 final class OpenAICompatibleLyricsTranslator {
-    private static let maximumRequestBytes = 2_097_152
-    private static let maximumResponseBytes = 2_097_152
     private static let maximumAttempts = 3
     /// The requests one track may make, per batch: enough to retry a batch
     /// twice or split it once, and the bound on what an endpoint that keeps
@@ -252,160 +47,38 @@ final class OpenAICompatibleLyricsTranslator {
     private static let connectionTestLineIndex = 0
     private static let connectionTestLineText = "Connection test."
 
-    private final class BoundedResponseLoader: NSObject, URLSessionDataDelegate {
-        private let configuration: URLSessionConfiguration
-        private let maximumResponseBytes: Int
-        private let lock = NSLock()
+    // This schema belongs to translation, not to the shared controller or native adapter.
+    private static let responseSchema: AIOutputSchema = .object(name: "LyricTranslationResponse", properties: [
+        .init(name: "translations", schema: .array(element: .object(name: "LyricTranslation", properties: [
+            .init(name: "index", schema: .integer),
+            .init(name: "text", schema: .string),
+        ]))),
+    ])
 
-        private var continuation: CheckedContinuation<(Data, URLResponse), Error>?
-        private var session: URLSession?
-        private var task: URLSessionDataTask?
-        private var response: URLResponse?
-        private var data = Data()
-        private var isFinished = false
+    private let aiClient: any AICompleting
+    private let providerClient: any AIProviderCompleting
 
-        init(configuration: URLSessionConfiguration, maximumResponseBytes: Int) {
-            self.configuration = configuration
-            self.maximumResponseBytes = maximumResponseBytes
-        }
-
-        func data(for request: URLRequest) async throws -> (Data, URLResponse) {
-            try await withTaskCancellationHandler(operation: {
-                try await withCheckedThrowingContinuation { continuation in
-                    lock.lock()
-                    guard !isFinished else {
-                        lock.unlock()
-                        continuation.resume(throwing: CancellationError())
-                        return
-                    }
-
-                    self.continuation = continuation
-                    let session = URLSession(
-                        configuration: configuration,
-                        delegate: self,
-                        delegateQueue: nil
-                    )
-                    let task = session.dataTask(with: request)
-                    self.session = session
-                    self.task = task
-                    let isAlreadyCancelled = Task.isCancelled
-                    lock.unlock()
-
-                    if isAlreadyCancelled {
-                        cancel()
-                    } else {
-                        task.resume()
-                    }
-                }
-            }, onCancel: { [weak self] in
-                self?.cancel()
-            })
-        }
-
-        func urlSession(
-            _ session: URLSession,
-            task: URLSessionTask,
-            willPerformHTTPRedirection response: HTTPURLResponse,
-            newRequest request: URLRequest,
-            completionHandler: @escaping (URLRequest?) -> Void
-        ) {
-            // The request carries a bearer credential. Require the user to configure
-            // the final endpoint instead of risking forwarding it through a redirect.
-            completionHandler(nil)
-        }
-
-        func urlSession(
-            _ session: URLSession,
-            dataTask: URLSessionDataTask,
-            didReceive response: URLResponse,
-            completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
-        ) {
-            if response.expectedContentLength > Int64(maximumResponseBytes) {
-                completionHandler(.cancel)
-                finish(.failure(OpenAICompatibleLyricsTranslatorError.responseTooLarge))
-                return
-            }
-
-            lock.lock()
-            let shouldContinue = !isFinished
-            if shouldContinue {
-                self.response = response
-            }
-            lock.unlock()
-            completionHandler(shouldContinue ? .allow : .cancel)
-        }
-
-        func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive newData: Data) {
-            lock.lock()
-            let exceedsLimit = !isFinished && newData.count > maximumResponseBytes - data.count
-            if !isFinished, !exceedsLimit {
-                data.append(newData)
-            }
-            lock.unlock()
-
-            if exceedsLimit {
-                dataTask.cancel()
-                finish(.failure(OpenAICompatibleLyricsTranslatorError.responseTooLarge))
-            }
-        }
-
-        func urlSession(
-            _ session: URLSession,
-            task: URLSessionTask,
-            didCompleteWithError error: Error?
-        ) {
-            if let error {
-                finish(.failure(error))
-                return
-            }
-
-            lock.lock()
-            let response = self.response
-            let data = self.data
-            lock.unlock()
-            guard let response else {
-                finish(.failure(OpenAICompatibleLyricsTranslatorError.invalidResponse))
-                return
-            }
-            finish(.success((data, response)))
-        }
-
-        private func cancel() {
-            lock.lock()
-            let task = self.task
-            lock.unlock()
-            task?.cancel()
-            finish(.failure(CancellationError()))
-        }
-
-        private func finish(_ result: Result<(Data, URLResponse), Error>) {
-            lock.lock()
-            guard !isFinished else {
-                lock.unlock()
-                return
-            }
-            isFinished = true
-            let continuation = self.continuation
-            let session = self.session
-            self.continuation = nil
-            self.session = nil
-            task = nil
-            lock.unlock()
-
-            switch result {
-            case .success:
-                session?.finishTasksAndInvalidate()
-            case .failure:
-                session?.invalidateAndCancel()
-            }
-            continuation?.resume(with: result)
-        }
+    init(aiClient: any AICompleting = AIController.shared,
+         providerClient: any AIProviderCompleting = AIController.shared) {
+        self.aiClient = aiClient
+        self.providerClient = providerClient
     }
 
     func translate(
         lyrics: Lyrics,
         configuration: AILyricsTranslationConfiguration,
         apiKey: String
+    ) async throws -> AILyricsTranslationResult {
+        try await translate(lyrics: lyrics, configuration: AIProviderTranslationConfiguration(
+            provider: .openAICompatible(.init(endpoint: configuration.endpoint, model: configuration.model)),
+            targetLanguage: configuration.targetLanguage, prompt: configuration.prompt
+        ), apiKey: apiKey)
+    }
+
+    func translate(
+        lyrics: Lyrics,
+        configuration: AIProviderTranslationConfiguration,
+        apiKey: String? = nil
     ) async throws -> AILyricsTranslationResult {
         let sourceLines = AILyricsTranslationPolicy.translationInputLines(
             lyrics: lyrics,
@@ -446,9 +119,9 @@ final class OpenAICompatibleLyricsTranslator {
 
     private func translateBatch(
         _ lines: [AILyricsTranslationInputLine],
-        configuration: AILyricsTranslationConfiguration,
+        configuration: AIProviderTranslationConfiguration,
         sourceLanguage: String?,
-        apiKey: String,
+        apiKey: String?,
         budget: RequestBudget
     ) async throws -> (translations: [Int: String], failedIndices: [Int], failure: Error?) {
         var remaining = lines
@@ -466,18 +139,10 @@ final class OpenAICompatibleLyricsTranslator {
             }
             budget.remainingRequests -= 1
             do {
-                let payload = try OpenAICompatibleChatRequest(
-                    configuration: configuration,
-                    sourceLanguage: sourceLanguage,
-                    sourceLines: remaining
-                )
-                let request = try request(
-                    endpoint: configuration.endpoint,
-                    apiKey: apiKey,
-                    payload: payload
-                )
-                let data = try await responseData(for: request)
-                let content = try OpenAICompatibleChatResponse.content(from: data)
+                let messages = try translationMessages(configuration: configuration,
+                    sourceLanguage: sourceLanguage, sourceLines: remaining)
+                let content = try await complete(messages: messages, configuration: configuration,
+                    apiKey: apiKey, maxTokens: OpenAICompatibleChatRequest.defaultMaxTokens)
                 let parsed = try AILyricsTranslationPolicy.parsedTranslations(
                     response: content,
                     expectedLines: remaining
@@ -576,84 +241,77 @@ final class OpenAICompatibleLyricsTranslator {
     /// Settling for a non-empty body is not enough: an endpoint that ignores
     /// `response_format: json_object` answers with prose, passes that check,
     /// and then fails every real request behind a green "Connection succeeded."
-    func testConnection(
-        configuration: AILyricsTranslationConfiguration,
-        apiKey: String
-    ) async throws {
-        let probeLine = AILyricsTranslationInputLine(
-            index: Self.connectionTestLineIndex,
-            text: Self.connectionTestLineText
-        )
-        let payload = try OpenAICompatibleChatRequest(
-            configuration: configuration,
-            sourceLanguage: nil,
-            sourceLines: [probeLine],
-            maxTokens: Self.connectionTestMaxTokens
-        )
-        let request = try request(
-            endpoint: configuration.endpoint,
-            apiKey: apiKey,
-            payload: payload
-        )
-        let data = try await responseData(for: request)
+    func testConnection(configuration: AILyricsTranslationConfiguration, apiKey: String) async throws {
+        try await testConnection(configuration: AIProviderTranslationConfiguration(
+            provider: .openAICompatible(.init(endpoint: configuration.endpoint, model: configuration.model)),
+            targetLanguage: configuration.targetLanguage, prompt: configuration.prompt
+        ), apiKey: apiKey)
+    }
+
+    func testConnection(configuration: AIProviderTranslationConfiguration, apiKey: String? = nil) async throws {
+        let probeLine = AILyricsTranslationInputLine(index: Self.connectionTestLineIndex, text: Self.connectionTestLineText)
+        let messages = try translationMessages(configuration: configuration, sourceLanguage: nil, sourceLines: [probeLine])
         let content: String
         do {
-            content = try OpenAICompatibleChatResponse.content(from: data)
-        } catch {
+            content = try await complete(messages: messages, configuration: configuration,
+                                         apiKey: apiKey, maxTokens: Self.connectionTestMaxTokens)
+        } catch AILyricsTranslationError.invalidResponse {
             throw OpenAICompatibleLyricsTranslatorError.invalidResponse
         }
-        let parsed = try AILyricsTranslationPolicy.parsedTranslations(
-            response: content,
-            expectedLines: [probeLine]
-        )
-        // Answered is enough: with an English target the probe line comes
-        // back as it went, which is no translation to keep but still proves
-        // the endpoint works.
+        let parsed = try AILyricsTranslationPolicy.parsedTranslations(response: content, expectedLines: [probeLine])
         guard !parsed.missingIndices.contains(probeLine.index) else {
             throw OpenAICompatibleLyricsTranslatorError.invalidResponse
         }
     }
 
-    private func request<Payload: Encodable>(
-        endpoint: URL,
-        apiKey: String,
-        payload: Payload
-    ) throws -> URLRequest {
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 90
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        let requestBody = try JSONEncoder().encode(payload)
-        guard requestBody.count <= Self.maximumRequestBytes else {
+    private func translationMessages(configuration: AIProviderTranslationConfiguration,
+                                     sourceLanguage: String?, sourceLines: [AILyricsTranslationInputLine]) throws
+        -> [OpenAICompatibleChatRequest.Message] {
+        [
+            .init(role: "system", content: AILyricsTranslationPolicy.systemPrompt),
+            .init(role: "user", content: try AILyricsTranslationPolicy.userMessage(
+                prompt: configuration.prompt, sourceLanguage: sourceLanguage,
+                targetLanguage: configuration.targetLanguage, sourceLines: sourceLines)),
+        ]
+    }
+
+    private func complete(
+        messages: [OpenAICompatibleChatRequest.Message],
+        configuration: AIProviderTranslationConfiguration,
+        apiKey: String?, maxTokens: Int
+    ) async throws -> String {
+        do {
+            switch configuration.provider {
+            case .openAICompatible(let connection):
+                guard let apiKey else { throw AIServiceError.invalidRequest }
+                return try await aiClient.completeOnce(configuration: connection, messages: messages,
+                                                        apiKey: apiKey, maxTokens: maxTokens)
+            case .appleLocal:
+                return try await providerClient.completeOnce(configuration: .appleLocal, messages: messages,
+                    responseSchema: Self.responseSchema, apiKey: nil, maxTokens: maxTokens)
+            }
+        } catch AppleLocalAIError.contextWindowExceeded {
+            // Context overflow is the one native error the existing bounded
+            // batch splitter can recover from. Other native errors are terminal.
             throw AILyricsTranslationError.lyricsTooLarge
+        } catch let error as AIServiceError {
+            switch error {
+            case .httpStatus(let status): throw OpenAICompatibleLyricsTranslatorError.httpStatus(status)
+            case .responseTooLarge: throw OpenAICompatibleLyricsTranslatorError.responseTooLarge
+            case .requestTooLarge: throw AILyricsTranslationError.lyricsTooLarge
+            case .invalidRequest, .invalidResponse: throw OpenAICompatibleLyricsTranslatorError.invalidResponse
+            }
+        } catch let error as AIConnectionError {
+            switch error {
+            case .invalidEndpoint: throw AILyricsTranslationError.invalidEndpoint
+            case .insecureEndpoint: throw AILyricsTranslationError.insecureEndpoint
+            case .missingModel: throw AILyricsTranslationError.missingModel
+            case .configurationTooLarge: throw AILyricsTranslationError.configurationTooLarge
+            case .invalidResponse: throw AILyricsTranslationError.invalidResponse
+            }
         }
-        request.httpBody = requestBody
-        return request
     }
 
-    private func responseData(for request: URLRequest) async throws -> Data {
-        let (data, response) = try await data(for: request)
-        guard let response = response as? HTTPURLResponse else {
-            throw OpenAICompatibleLyricsTranslatorError.invalidResponse
-        }
-        guard 200 ..< 300 ~= response.statusCode else {
-            throw OpenAICompatibleLyricsTranslatorError.httpStatus(response.statusCode)
-        }
-        return data
-    }
-
-    private func data(for request: URLRequest) async throws -> (Data, URLResponse) {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.timeoutIntervalForRequest = 90
-        configuration.timeoutIntervalForResource = 120
-        return try await BoundedResponseLoader(
-            configuration: configuration,
-            maximumResponseBytes: Self.maximumResponseBytes
-        ).data(for: request)
-    }
 }
 
 extension OpenAICompatibleLyricsTranslator {
@@ -661,6 +319,7 @@ extension OpenAICompatibleLyricsTranslator {
     /// test or a translation. One generic sentence sent the user hunting
     /// through three settings when the endpoint had answered 401.
     static func failureDescription(for error: Error) -> String {
+        if error is AppleLocalAIError { return AIController.failureDescription(for: error) }
         let noTranslationDescription = NSLocalizedString(
             "The endpoint did not answer with a translation. It may not support JSON mode.",
             comment: "Status shown when the AI translation endpoint gives a well-formed HTTP answer that is not a translation."

@@ -40,3 +40,5 @@
 | [0029](0029-playback-route-lyrics-offset.md) | 按播放器与输出设备设置歌词偏移 | Implemented |
 | [draft](draft-split-lyricsx-foundation.md) | 拆分 LyricsXFoundation，包里的模块统一以 Lyrics 开头 | Draft |
 | [draft](draft-apple-music-token-status.md) | 实验室页显示 Apple Music token 是否有效 | Accepted |
+| [draft](draft-shared-ai-controller.md) | 应用级共享 AI 控制器 | Accepted |
+| [draft](draft-apple-local-ai.md) | 原生 Apple 本地模型后端 | Accepted |

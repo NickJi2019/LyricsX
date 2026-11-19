@@ -36,7 +36,8 @@ class PreferenceLabViewController: PreferenceViewController {
     /// Goes back from a picked colour to the system accent colour.
     private let menuBarKaraokeAccentColorButton = NSButton()
 
-    private let aiLyricsTranslator = OpenAICompatibleLyricsTranslator()
+    private let aiController = AIController.shared
+    private let aiServiceStatusField = NSTextField(labelWithString: "")
     private var aiConnectionTestTask: Task<Void, Never>?
     private var defaultsObservation: AnyCancellable?
     private var languagePairToDownloadObservation: AnyCancellable?
@@ -64,6 +65,7 @@ class PreferenceLabViewController: PreferenceViewController {
         super.viewDidLoad()
 
         insertLyricsTranslationBox()
+        insertAIServiceBox()
         insertMenuBarKaraokeProgressColorRow()
         embedContentInScrollView()
         if #available(macOS 26.0, *) {
@@ -129,11 +131,13 @@ class PreferenceLabViewController: PreferenceViewController {
         lyricsTranslationTargetLanguageField.stringValue = defaults[.lyricsTranslationTargetLanguage]
         selectLyricsTranslationEngine(defaults.lyricsTranslationEngine)
         refreshLyricsTranslationStatusField()
+        refreshAIServiceStatusField()
         refreshMenuBarKaraokeProgressColorControls()
         defaultsObservation = NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.refreshLyricsTranslationStatusField()
+                self?.refreshAIServiceStatusField()
                 self?.refreshMenuBarKaraokeProgressColorControls()
             }
         languagePairToDownloadObservation = AppController.shared.$systemTranslationLanguagePairToDownload
@@ -153,6 +157,9 @@ class PreferenceLabViewController: PreferenceViewController {
         super.viewWillDisappear()
         aiConnectionTestTask?.cancel()
         aiConnectionTestTask = nil
+        if defaults[.aiServiceStatus] == NSLocalizedString("Testing connection…", comment: "Shared AI connection test status.") {
+            updateAIServiceStatus("")
+        }
     }
 
     // MARK: - Layout
@@ -248,6 +255,59 @@ class PreferenceLabViewController: PreferenceViewController {
         defaults.remove(.menuBarKaraokeProgressColor)
     }
 
+    private func insertAIServiceBox() {
+        let configure = NSButton(
+            title: NSLocalizedString("Configure AI service…", comment: "Open shared AI connection settings."),
+            target: self, action: #selector(configureAIService(_:))
+        )
+        configure.bezelStyle = .rounded
+        let help = NSTextField(wrappingLabelWithString: NSLocalizedString(
+            "Shared connection settings. Configuring a service does not enable translation or another AI feature.",
+            comment: "Shared AI settings do not enable any feature."
+        ))
+        help.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        help.textColor = .secondaryLabelColor
+        help.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        aiServiceStatusField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        aiServiceStatusField.textColor = .secondaryLabelColor
+        aiServiceStatusField.lineBreakMode = .byTruncatingTail
+        aiServiceStatusField.usesSingleLineMode = true
+        aiServiceStatusField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let grid = NSGridView(views: [
+            [NSGridCell.emptyContentView, configure],
+            [NSGridCell.emptyContentView, help],
+            [NSGridCell.emptyContentView, aiServiceStatusField],
+        ])
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        grid.columnSpacing = 20
+        grid.rowSpacing = 6
+        grid.column(at: 0).width = 138
+        grid.column(at: 1).width = 338
+        grid.cell(for: configure)?.xPlacement = .leading
+        grid.cell(for: help)?.xPlacement = .fill
+        grid.cell(for: aiServiceStatusField)?.xPlacement = .fill
+        let box = NSBox()
+        box.title = NSLocalizedString("AI service", comment: "Shared AI settings box title.")
+        box.contentViewMargins = .zero
+        box.translatesAutoresizingMaskIntoConstraints = false
+        let content = box.contentView!
+        content.addSubview(grid)
+        NSLayoutConstraint.activate([
+            grid.topAnchor.constraint(equalTo: content.topAnchor, constant: 8),
+            grid.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+            content.trailingAnchor.constraint(greaterThanOrEqualTo: grid.trailingAnchor, constant: 12),
+            content.bottomAnchor.constraint(equalTo: grid.bottomAnchor, constant: 8),
+        ])
+        let outer = contentGridView
+        let index = (0 ..< outer.numberOfRows).first {
+            outer.row(at: $0).cell(at: 0).contentView is NSBox
+        } ?? outer.numberOfRows
+        let row = outer.insertRow(at: index, with: [box, NSGridCell.emptyContentView])
+        row.topPadding = 5
+        row.mergeCells(in: NSRange(location: 0, length: 2))
+        row.cell(at: 0).xPlacement = .fill
+    }
+
     /// Adds the lyrics translation box above the Apple Music one, built the way
     /// the storyboard builds that box: a titled box spanning both columns, its
     /// own grid inset 12 pt, with a 138 pt label column — so the box's labels
@@ -305,8 +365,8 @@ class PreferenceLabViewController: PreferenceViewController {
 
         let configureButton = aiLyricsTranslationConfigureButton
         configureButton.title = NSLocalizedString(
-            "Configure…",
-            comment: "Button in the Lab pane that opens the AI translation settings."
+            "Translation prompt…",
+            comment: "Button opening only the translation prompt editor."
         )
         configureButton.bezelStyle = .rounded
         configureButton.target = self
@@ -527,7 +587,7 @@ class PreferenceLabViewController: PreferenceViewController {
             )
         case .ai:
             return NSLocalizedString(
-                "AI (OpenAI-compatible)",
+                "AI (selected service)",
                 comment: "Lab pane translation engine choice that sends lines to an OpenAI-compatible endpoint."
             )
         }
@@ -626,51 +686,75 @@ class PreferenceLabViewController: PreferenceViewController {
     }
 
     @objc private func configureAILyricsTranslation(_ sender: NSButton) {
-        let settings = AILyricsTranslationSettingsViewController()
-        settings.onSave = { [weak self] configuration, shouldTest in
-            AppController.shared.retryLyricsTranslation()
-
-            if shouldTest {
-                self?.testAITranslationConnection(configuration: configuration)
+        let settings = AISettingsViewController()
+        settings.purpose = .translationPrompt
+        settings.onSave = { _ in
+            if defaults.lyricsTranslationEngine == .ai {
+                AppController.shared.retryLyricsTranslation()
             }
         }
         presentAsSheet(settings)
     }
 
-    private func testAITranslationConnection(configuration: AILyricsTranslationConfiguration) {
+    @objc private func configureAIService(_ sender: NSButton) {
         aiConnectionTestTask?.cancel()
-        updateLyricsTranslationStatus(NSLocalizedString(
-            "Testing connection…",
-            comment: "Status shown while testing the AI lyrics translation endpoint."
-        ))
+        updateAIServiceStatus("")
+        let settings = AISettingsViewController()
+        settings.purpose = .connection
+        settings.onSave = { [weak self] shouldTest in
+            // Saving/testing a connection never switches the translation engine.
+            if defaults.lyricsTranslationEngine == .ai {
+                AppController.shared.retryLyricsTranslation()
+            }
+            if shouldTest, let self = self, let configuration = try? self.aiController.providerConfiguration {
+                self.testAIServiceConnection(configuration: configuration)
+            }
+        }
+        presentAsSheet(settings)
+    }
+
+    private func testAIServiceConnection(configuration: AIProviderConfiguration) {
+        aiConnectionTestTask?.cancel()
+        updateAIServiceStatus(NSLocalizedString("Testing connection…", comment: "Shared AI connection test status."))
         aiConnectionTestTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                guard let apiKey = try AILyricsTranslationCredentialStore.apiKey(for: configuration.endpoint) else {
-                    updateLyricsTranslationStatus(NSLocalizedString(
-                        "No API key is saved for this endpoint.",
-                        comment: "Status shown when endpoint testing finds no stored API key."
-                    ))
-                    return
+                let apiKey: String?
+                switch configuration {
+                case .openAICompatible(let connection):
+                    guard let key = try AICredentialStore.apiKey(for: connection.endpoint) else {
+                        updateAIServiceStatus(NSLocalizedString(
+                            "No API key is saved for this endpoint.", comment: "Missing shared AI service key."
+                        ))
+                        return
+                    }
+                    apiKey = key
+                case .appleLocal:
+                    apiKey = nil
                 }
-                try await aiLyricsTranslator.testConnection(
-                    configuration: configuration,
-                    apiKey: apiKey
-                )
+                try await aiController.testConnection(configuration: configuration, apiKey: apiKey)
                 guard !Task.isCancelled else { return }
-                updateLyricsTranslationStatus(NSLocalizedString(
-                    "Connection succeeded.",
-                    comment: "Status shown when the AI lyrics translation endpoint test succeeds."
-                ))
+                updateAIServiceStatus(NSLocalizedString("Connection succeeded.", comment: "Shared AI connection succeeded."))
             } catch is CancellationError {
                 return
             } catch let error as URLError where error.code == .cancelled {
                 return
             } catch {
                 guard !Task.isCancelled else { return }
-                updateLyricsTranslationStatus(OpenAICompatibleLyricsTranslator.failureDescription(for: error))
+                updateAIServiceStatus(AIController.failureDescription(for: error))
             }
         }
+    }
+
+    private func updateAIServiceStatus(_ message: String) {
+        defaults[.aiServiceStatus] = message
+        refreshAIServiceStatusField()
+    }
+
+    private func refreshAIServiceStatusField() {
+        let status = defaults[.aiServiceStatus]
+        aiServiceStatusField.stringValue = status
+        aiServiceStatusField.toolTip = status.isEmpty ? nil : status
     }
 
     private func updateLyricsTranslationStatus(_ message: String) {

@@ -1,7 +1,7 @@
 import AppKit
 import LyricsXFoundation
 
-/// The AI translation settings form, presented as a sheet.
+/// Shared AI connection settings or a translation-only prompt editor, presented as a sheet.
 ///
 /// A sheet rather than an `NSAlert` accessory view: this is four fields and a
 /// destructive action, and it needs somewhere to put a line of help under each
@@ -15,10 +15,20 @@ import LyricsXFoundation
 /// user, so a number written here that does not match reality is a number that
 /// clips: a help label laid out at its unwrapped length is what pushed the last
 /// version past the edge of the screen.
-final class AILyricsTranslationSettingsViewController: NSViewController {
-    /// Called once the fields validate, the key is stored and the preferences
-    /// are written. `shouldTest` is true for the Save and Test button.
-    var onSave: ((AILyricsTranslationConfiguration, Bool) -> Void)?
+final class AISettingsViewController: NSViewController {
+    enum Purpose { case connection, translationPrompt }
+    var purpose: Purpose = .connection
+    /// Called after this form's settings are saved. Only the connection form
+    /// offers Save and Test; editing a prompt never sends a connection probe.
+    var onSave: ((Bool) -> Void)?
+
+    private let backendPopUpButton = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let localStatusField = NSTextField(wrappingLabelWithString: "")
+    private var remoteRows: [NSView] = []
+    private var localStatusRow: NSView?
+    private var selectedBackend: AIBackend {
+        (backendPopUpButton.selectedItem?.representedObject as? String).flatMap(AIBackend.init(rawValue:)) ?? .openAICompatible
+    }
 
     private let endpointField = NSTextField()
     private let modelField = NSTextField()
@@ -73,11 +83,11 @@ final class AILyricsTranslationSettingsViewController: NSViewController {
 
     override func loadView() {
         endpointField.stringValue = defaults[.aiLyricsTranslationEndpoint].isEmpty
-            ? AILyricsTranslationPolicy.defaultEndpoint
+            ? AIConnectionPolicy.defaultEndpoint
             : defaults[.aiLyricsTranslationEndpoint]
 
         modelField.stringValue = defaults[.aiLyricsTranslationModel].isEmpty
-            ? AILyricsTranslationPolicy.defaultModel
+            ? AIConnectionPolicy.defaultModel
             : defaults[.aiLyricsTranslationModel]
 
         promptTextView.string = AILyricsTranslationPolicy.resolvedPrompt(
@@ -107,7 +117,8 @@ final class AILyricsTranslationSettingsViewController: NSViewController {
             NSLocalizedString("API key", comment: "AI lyrics translation API-key setting."),
             NSLocalizedString("Prompt", comment: "AI lyrics translation prompt setting."),
         ]
-        let labelColumnWidth = Self.widestLabelWidth(titles)
+        let backendTitle = NSLocalizedString("Backend", comment: "AI backend selector label.")
+        let labelColumnWidth = Self.widestLabelWidth(purpose == .connection ? [backendTitle] + Array(titles.prefix(3)) : [titles[3]])
 
         // Indented like everything else, so the message is read as belonging
         // to the field it names rather than to the window. Hidden as a whole
@@ -117,46 +128,81 @@ final class AILyricsTranslationSettingsViewController: NSViewController {
         problemRow.isHidden = true
         self.problemRow = problemRow
 
-        let rows = NSStackView(views: [
-            makeIndentedRow(
-                makeWrappingLabel(NSLocalizedString(
-                    "Eligible lyric lines are sent to this endpoint for translation. The provider may charge for requests, and may keep what it receives.",
-                    comment: "Privacy and cost notice for AI lyrics translation."
-                )),
-                labelColumnWidth: labelColumnWidth
-            ),
-            makeFieldRow(
-                title: titles[0],
-                labelColumnWidth: labelColumnWidth,
-                control: endpointField,
-                help: NSLocalizedString(
-                    "The chat-completions URL that receives the lines. HTTPS is required, except for a loopback address such as http://localhost.",
-                    comment: "Help text under the AI translation endpoint setting."
-                )
-            ),
-            makeFieldRow(
-                title: titles[1],
-                labelColumnWidth: labelColumnWidth,
-                control: modelField,
-                help: NSLocalizedString(
-                    "The model name this endpoint expects, for example gpt-4o-mini.",
-                    comment: "Help text under the AI translation model setting."
-                )
-            ),
-            makeFieldRow(
-                title: titles[2],
-                labelColumnWidth: labelColumnWidth,
-                control: apiKeyField,
-                help: NSLocalizedString(
-                    "Kept in the Keychain and bound to this endpoint's host, so changing the host means saving the key again.",
-                    comment: "Help text under the AI translation API-key setting."
+        var formRows: [NSView] = []
+        if purpose == .connection {
+            formRows = [
+                makeIndentedRow(
+                    makeWrappingLabel(NSLocalizedString(
+                        "Enabled AI features send their input to this endpoint. The provider may charge for requests and may keep what it receives.",
+                        comment: "Privacy and cost notice for AI lyrics translation."
+                    )),
+                    labelColumnWidth: labelColumnWidth
                 ),
-                accessory: removeKeyButton
-            ),
-            makePromptRow(title: titles[3], labelColumnWidth: labelColumnWidth),
-            problemRow,
-        ])
+                makeFieldRow(
+                    title: titles[0],
+                    labelColumnWidth: labelColumnWidth,
+                    control: endpointField,
+                    help: NSLocalizedString(
+                        "The chat-completions URL that receives the lines. HTTPS is required, except for a loopback address such as http://localhost.",
+                        comment: "Help text under the AI translation endpoint setting."
+                    )
+                ),
+                makeFieldRow(
+                    title: titles[1],
+                    labelColumnWidth: labelColumnWidth,
+                    control: modelField,
+                    help: NSLocalizedString(
+                        "The model name this endpoint expects, for example gpt-4o-mini.",
+                        comment: "Help text under the AI translation model setting."
+                    )
+                ),
+                makeFieldRow(
+                    title: titles[2],
+                    labelColumnWidth: labelColumnWidth,
+                    control: apiKeyField,
+                    help: NSLocalizedString(
+                        "Kept in the Keychain and bound to this endpoint's host, so changing the host means saving the key again.",
+                        comment: "Help text under the AI translation API-key setting."
+                    ),
+                    accessory: removeKeyButton
+                ),
+            ]
+            remoteRows = formRows
+            backendPopUpButton.autoenablesItems = false
+            for backend in AIBackend.allCases {
+                let title = backend == .appleLocal
+                    ? NSLocalizedString("Apple on-device model", comment: "Native Foundation Models AI backend.")
+                    : NSLocalizedString("OpenAI-compatible service", comment: "Remote AI backend.")
+                backendPopUpButton.addItem(withTitle: title)
+                backendPopUpButton.lastItem?.representedObject = backend.rawValue
+                if backend == .appleLocal {
+                    if #available(macOS 26.0, *) {} else {
+                        backendPopUpButton.lastItem?.isEnabled = false
+                        backendPopUpButton.lastItem?.toolTip = NSLocalizedString("Requires macOS 26 or later", comment: "Local AI minimum OS.")
+                    }
+                }
+            }
+            let selectedIndex = backendPopUpButton.indexOfItem(withRepresentedObject: defaults.aiBackend.rawValue)
+            if selectedIndex >= 0 { backendPopUpButton.selectItem(at: selectedIndex) }
+            backendPopUpButton.target = self
+            backendPopUpButton.action = #selector(backendChanged)
+            localStatusField.font = .systemFont(ofSize: 11)
+            localStatusField.textColor = .secondaryLabelColor
+            localStatusField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            let localRow = makeIndentedRow(localStatusField, labelColumnWidth: labelColumnWidth)
+            localStatusRow = localRow
+            formRows.insert(makeFieldRow(
+                title: backendTitle, labelColumnWidth: labelColumnWidth, control: backendPopUpButton,
+                help: NSLocalizedString("Choose a local Apple model or an OpenAI-compatible service. Features remain independently enabled.", comment: "AI backend selection help.")
+            ), at: 0)
+            formRows.append(localRow)
+        } else {
+            formRows = [makePromptRow(title: titles[3], labelColumnWidth: labelColumnWidth)]
+        }
+        formRows.append(problemRow)
+        let rows = NSStackView(views: formRows)
         rows.orientation = .vertical
+        rows.detachesHiddenViews = true
         // Every row is the stack's width, so each row's field column resolves
         // to the same width and the text inside wraps to it rather than
         // deciding the sheet's width by being long.
@@ -173,20 +219,19 @@ final class AILyricsTranslationSettingsViewController: NSViewController {
             row.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
         }
 
-        let buttons = NSStackView(views: [
-            makeButton(
-                NSLocalizedString("Cancel", comment: "Cancel AI lyrics translation settings."),
-                action: #selector(cancel)
-            ),
-            makeButton(
-                NSLocalizedString("Save and Test", comment: "Save settings and test the AI lyrics translation endpoint."),
+        var actionButtons = [makeButton(
+            NSLocalizedString("Cancel", comment: "Cancel AI settings."), action: #selector(cancel)
+        )]
+        if purpose == .connection {
+            actionButtons.append(makeButton(
+                NSLocalizedString("Save and Test", comment: "Save and test the shared AI connection."),
                 action: #selector(saveAndTest)
-            ),
-            makeButton(
-                NSLocalizedString("Save", comment: "Save AI lyrics translation settings."),
-                action: #selector(save)
-            ),
-        ])
+            ))
+        }
+        actionButtons.append(makeButton(
+            NSLocalizedString("Save", comment: "Save AI settings."), action: #selector(save)
+        ))
+        let buttons = NSStackView(views: actionButtons)
         buttons.orientation = .horizontal
         buttons.spacing = Self.buttonGap
         buttons.translatesAutoresizingMaskIntoConstraints = false
@@ -200,14 +245,17 @@ final class AILyricsTranslationSettingsViewController: NSViewController {
         // Recomputed as the endpoint is edited, since promising a keep the save
         // path will not honour sends the user hunting for a blank field while
         // the real cause is that their key belongs to the host they moved off.
-        lastProbedOrigin = nil
-        updateAPIKeyPlaceholder()
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(endpointChanged),
-            name: NSControl.textDidChangeNotification,
-            object: endpointField
-        )
+        if purpose == .connection {
+            applyBackendSelection()
+            lastProbedOrigin = nil
+            updateAPIKeyPlaceholder()
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(endpointChanged),
+                name: NSControl.textDidChangeNotification,
+                object: endpointField
+            )
+        }
     }
 
     deinit {
@@ -274,7 +322,7 @@ final class AILyricsTranslationSettingsViewController: NSViewController {
 
     /// Sizes the sheet to the form as it stands: the scroller takes the
     /// content's height up to whatever the screen can spare, and the sheet
-    /// takes the root's fitting size. One rule, so the initial layout and the
+    /// adds the measured action row and existing spacing. One rule, so the initial layout and the
     /// path that runs when a validation message appears cannot drift apart.
     ///
     /// It reads `view`, so it must not be called while `loadView` is still
@@ -283,12 +331,19 @@ final class AILyricsTranslationSettingsViewController: NSViewController {
     private func sizeSheetToContent() {
         guard isViewLoaded else { return }
         view.layoutSubtreeIfNeeded()
-        guard let scrollerHeightConstraint, let rowsStack else { return }
+        guard let scrollerHeightConstraint, let rowsStack,
+              let buttons = view.subviews.compactMap({ $0 as? NSStackView }).first else { return }
         let contentHeight = rowsStack.fittingSize.height + Self.contentInset * 2
         let screenLimited = (NSScreen.main?.visibleFrame.height ?? 900) - Self.screenVerticalMargin
         scrollerHeightConstraint.constant = min(contentHeight, screenLimited)
         view.layoutSubtreeIfNeeded()
-        preferredContentSize = view.fittingSize
+        // Once presented, the window's current height participates in the
+        // root view's fittingSize and stretches the button row after fields
+        // hide. Measure the form and action row, not that enclosing window.
+        preferredContentSize = NSSize(
+            width: Self.sheetWidth,
+            height: scrollerHeightConstraint.constant + Self.buttonGap + buttons.fittingSize.height + Self.contentInset
+        )
     }
 
     /// A document view that reports `isFlipped`, so a form taller than the
@@ -429,6 +484,33 @@ final class AILyricsTranslationSettingsViewController: NSViewController {
         return button
     }
 
+    @objc private func backendChanged() {
+        problemRow?.isHidden = true
+        applyBackendSelection()
+        updateAPIKeyPlaceholder()
+    }
+
+    private func applyBackendSelection() {
+        guard purpose == .connection else { return }
+        let local = selectedBackend == .appleLocal
+        for row in remoteRows { row.isHidden = local }
+        localStatusRow?.isHidden = !local
+        if local {
+            let status = AppleLocalAIClient.status()
+            var description = status.description
+            if let context = status.contextSize {
+                description += "\n" + String(format: NSLocalizedString("Context window: %d tokens.", comment: "Native local model context size."), context)
+            }
+            if !status.supportedLanguages.isEmpty {
+                description += "\n" + String(format: NSLocalizedString("Supported languages: %@", comment: "Native local model supported languages."), status.supportedLanguages.joined(separator: ", "))
+            }
+            description += "\n" + NSLocalizedString("Runs on this Mac. No endpoint, API key, fm server or cloud fallback is used.", comment: "Local AI data path.")
+            localStatusField.stringValue = description
+        }
+        rowsStack?.layoutSubtreeIfNeeded()
+        sizeSheetToContent()
+    }
+
     // MARK: - API key state
 
     @objc private func endpointChanged() {
@@ -436,8 +518,9 @@ final class AILyricsTranslationSettingsViewController: NSViewController {
     }
 
     @objc private func removeStoredAPIKey() {
+        guard purpose == .connection, selectedBackend == .openAICompatible else { return }
         do {
-            try AILyricsTranslationCredentialStore.removeAPIKey()
+            try AICredentialStore.removeAPIKey()
         } catch {
             present(problem: NSLocalizedString(
                 "The saved key could not be removed from the Keychain.",
@@ -453,13 +536,14 @@ final class AILyricsTranslationSettingsViewController: NSViewController {
     }
 
     private func updateAPIKeyPlaceholder() {
+        guard purpose == .connection, selectedBackend == .openAICompatible else { return }
         let endpointURL = URL(string: endpointField.stringValue)
-        let origin = endpointURL.flatMap { AILyricsTranslationPolicy.endpointOrigin($0) }
+        let origin = endpointURL.flatMap { AIConnectionPolicy.endpointOrigin($0) }
         if origin != lastProbedOrigin {
             lastProbedOrigin = origin
             // One Keychain read per host, not one per keystroke.
             lastProbedOriginHasKey = origin == nil ? false : endpointURL.map {
-                (try? AILyricsTranslationCredentialStore.hasAccessibleAPIKey(for: $0)) ?? false
+                (try? AICredentialStore.hasAccessibleAPIKey(for: $0)) ?? false
             } ?? false
         }
         apiKeyField.placeholderString = lastProbedOriginHasKey
@@ -489,47 +573,47 @@ final class AILyricsTranslationSettingsViewController: NSViewController {
     }
 
     private func finish(shouldTest: Bool) {
-        let configuration: AILyricsTranslationConfiguration
-        do {
-            configuration = try AILyricsTranslationPolicy.configuration(
-                endpoint: endpointField.stringValue,
-                model: modelField.stringValue.isEmpty
-                    ? AILyricsTranslationPolicy.defaultModel
-                    : modelField.stringValue,
-                // Set in the Lab pane, where it is shared with system translation.
-                targetLanguage: defaults.resolvedLyricsTranslationTargetLanguage,
-                prompt: promptTextView.string
-            )
-        } catch {
-            present(problem: Self.message(for: error))
-            return
-        }
-
-        let newAPIKey = apiKeyField.stringValue
-        if !newAPIKey.isEmpty {
-            do {
-                try AILyricsTranslationCredentialStore.store(apiKey: newAPIKey, for: configuration.endpoint)
-            } catch {
-                present(problem: NSLocalizedString(
-                    "The API key could not be stored in the Keychain.",
-                    comment: "Error shown when a new AI translation API key cannot be saved."
-                ))
+        view.window?.makeFirstResponder(nil)
+        if purpose == .translationPrompt {
+            guard promptTextView.string.utf8.count <= AILyricsTranslationPolicy.maximumPromptBytes else {
+                present(problem: NSLocalizedString("One of these values is too long.", comment: "AI prompt exceeds its limit."))
                 return
             }
+            // Keep the existing default-as-empty storage convention.
+            defaults[.aiLyricsTranslationPrompt] = AILyricsTranslationPolicy.resolvedPrompt(promptTextView.string)
+                == AILyricsTranslationPolicy.defaultPrompt ? "" : promptTextView.string
+        } else if selectedBackend == .appleLocal {
+            // Preserve hidden remote values and credentials verbatim.
+            defaults.aiBackend = .appleLocal
+        } else {
+            let configuration: AIConnectionSnapshot
+            do {
+                configuration = try AIConnectionPolicy.configuration(
+                    endpoint: endpointField.stringValue,
+                    model: modelField.stringValue.isEmpty ? AIConnectionPolicy.defaultModel : modelField.stringValue
+                )
+            } catch {
+                present(problem: Self.message(for: error))
+                return
+            }
+            let newAPIKey = apiKeyField.stringValue
+            if !newAPIKey.isEmpty {
+                do {
+                    try AICredentialStore.store(apiKey: newAPIKey, for: configuration.endpoint)
+                } catch {
+                    present(problem: NSLocalizedString(
+                        "The API key could not be stored in the Keychain.", comment: "AI service key storage failed."
+                    ))
+                    return
+                }
+            }
+            // These are intentionally the legacy storage keys. No migration or
+            // translation prompt/target-language write is part of connection save.
+            defaults[.aiLyricsTranslationEndpoint] = configuration.endpoint.absoluteString
+            defaults[.aiLyricsTranslationModel] = configuration.model
+            defaults.aiBackend = .openAICompatible
         }
-
-        defaults[.aiLyricsTranslationEndpoint] = configuration.endpoint.absoluteString
-        defaults[.aiLyricsTranslationModel] = configuration.model
-        // Stored empty while it is still the default. Writing the default text
-        // verbatim would freeze today's wording in the database, and a later
-        // improvement to it would then reach only users who had never opened
-        // this sheet.
-        defaults[.aiLyricsTranslationPrompt] = AILyricsTranslationPolicy.resolvedPrompt(promptTextView.string)
-            == AILyricsTranslationPolicy.defaultPrompt
-            ? ""
-            : promptTextView.string
-
-        onSave?(configuration, shouldTest)
+        onSave?(purpose == .connection && shouldTest)
         dismiss(nil)
     }
 
@@ -559,7 +643,7 @@ final class AILyricsTranslationSettingsViewController: NSViewController {
     }
 
     private static func message(for error: Error) -> String {
-        guard let error = error as? AILyricsTranslationError else {
+        guard let error = error as? AIConnectionError else {
             return NSLocalizedString(
                 "These settings could not be used.",
                 comment: "Generic error for invalid AI translation settings."
@@ -581,20 +665,12 @@ final class AILyricsTranslationSettingsViewController: NSViewController {
                 "Enter a model name.",
                 comment: "Error shown when no AI translation model is given."
             )
-        case .missingTargetLanguage, .invalidTargetLanguage:
-            return NSLocalizedString(
-                "Enter a language tag such as zh-Hans or ja.",
-                comment: "Error shown when the AI translation target language is not a valid language tag."
-            )
+        case .invalidResponse:
+            return NSLocalizedString("These settings could not be used.", comment: "Invalid AI service response.")
         case .configurationTooLarge:
             return NSLocalizedString(
                 "One of these values is too long.",
                 comment: "Error shown when an AI translation setting exceeds its size limit."
-            )
-        case .lyricsTooLarge, .invalidResponse:
-            return NSLocalizedString(
-                "These settings could not be used.",
-                comment: "Generic error for invalid AI translation settings."
             )
         }
     }

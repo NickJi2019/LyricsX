@@ -1,6 +1,540 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "The Apple local model did not return a valid JSON object." : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 本地模型未返回有效的 JSON 对象。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 本機模型未傳回有效的 JSON 物件。"
+          }
+        }
+      }
+    },
+    "The Apple local model declined this request." : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 本地模型未接受此请求。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 本機模型未接受此要求。"
+          }
+        }
+      }
+    },
+    "The Apple local model does not support this language or locale." : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 本地模型不支持此语言或区域。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 本機模型不支援此語言或地區。"
+          }
+        }
+      }
+    },
+    "The request exceeded the Apple local model's context window." : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请求超过了 Apple 本地模型的上下文窗口。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "要求超過了 Apple 本機模型的上下文視窗。"
+          }
+        }
+      }
+    },
+    "The Apple local model is unavailable." : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 本地模型当前不可用。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 本機模型目前無法使用。"
+          }
+        }
+      }
+    },
+    "The Apple local model is not ready. Check Apple Intelligence in System Settings." : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 本地模型尚未就绪，请检查系统设置中的 Apple 智能。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 本機模型尚未就緒，請檢查系統設定中的 Apple 智慧。"
+          }
+        }
+      }
+    },
+    "Enable Apple Intelligence in System Settings to use the local model." : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请在系统设置中启用 Apple 智能以使用本地模型。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請在系統設定中啟用 Apple 智慧以使用本機模型。"
+          }
+        }
+      }
+    },
+    "This Mac does not support the Apple local model." : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台 Mac 不支持 Apple 本地模型。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這台 Mac 不支援 Apple 本機模型。"
+          }
+        }
+      }
+    },
+    "Apple local AI requires macOS 26 or later." : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 本地 AI 需要 macOS 26 或更新版本。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 本機 AI 需要 macOS 26 或更新版本。"
+          }
+        }
+      }
+    },
+    "Apple local model is available." : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 本地模型可用。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 本機模型可用。"
+          }
+        }
+      }
+    },
+    "AI (selected service)" : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI（所选服务）"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI（所選服務）"
+          }
+        }
+      }
+    },
+    "Runs on this Mac. No endpoint, API key, fm server or cloud fallback is used." : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "直接在这台 Mac 上运行，无需端点、API 密钥或 fm 服务，不会自动改用云端。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "直接在這台 Mac 上執行，無須端點、API 金鑰或 fm 服務，不會自動改用雲端。"
+          }
+        }
+      }
+    },
+    "Supported languages: %@" : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "支持的语言：%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "支援的語言：%@"
+          }
+        }
+      }
+    },
+    "Context window: %d tokens." : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上下文窗口：%d tokens。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上下文視窗：%d tokens。"
+          }
+        }
+      }
+    },
+    "Choose a local Apple model or an OpenAI-compatible service. Features remain independently enabled." : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择 Apple 本地模型或 OpenAI 兼容服务。各功能仍分别开启。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選擇 Apple 本機模型或 OpenAI 相容服務。各功能仍分別啟用。"
+          }
+        }
+      }
+    },
+    "OpenAI-compatible service" : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenAI 兼容服务"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenAI 相容服務"
+          }
+        }
+      }
+    },
+    "Apple on-device model" : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 本地模型"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 本機模型"
+          }
+        }
+      }
+    },
+    "Backend" : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "后端"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "後端"
+          }
+        }
+      }
+    },
+    "The keychain is temporarily unavailable; the AI connection can be tested later." : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "钥匙串暂时不可用，请稍后测试 AI 连接。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "鑰匙圈暫時無法使用，請稍後測試 AI 連線。"
+          }
+        }
+      }
+    },
+    "The AI connection settings are incomplete or invalid." : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 连接设置不完整或无效。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 連線設定不完整或無效。"
+          }
+        }
+      }
+    },
+    "Enter an AI model name." : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请输入 AI 模型名称。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請輸入 AI 模型名稱。"
+          }
+        }
+      }
+    },
+    "The AI endpoint did not return a valid JSON-mode chat response." : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 端点未返回有效的 JSON 模式对话响应。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 端點未傳回有效的 JSON 模式對話回應。"
+          }
+        }
+      }
+    },
+    "The AI request settings are invalid." : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 请求设置无效。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 請求設定無效。"
+          }
+        }
+      }
+    },
+    "The AI request was too large to send." : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 请求过大，未发送。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 請求過大，未傳送。"
+          }
+        }
+      }
+    },
+    "The AI endpoint's answer was too large to read." : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 端点的响应过大。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 端點的回應過大。"
+          }
+        }
+      }
+    },
+    "The AI endpoint answered HTTP %d." : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 端点返回了 HTTP %d。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 端點傳回 HTTP %d。"
+          }
+        }
+      }
+    },
+    "Add an API key in AI service settings." : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请在 AI 服务设置中添加 API 密钥。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請在 AI 服務設定中加入 API 金鑰。"
+          }
+        }
+      }
+    },
+    "Enabled AI features send their input to this endpoint. The provider may charge for requests and may keep what it receives." : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已开启的 AI 功能会将输入发送到此端点。服务商可能收取请求费用并保留接收的内容。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已啟用的 AI 功能會將輸入傳送到此端點。服務商可能收取請求費用並保留收到的內容。"
+          }
+        }
+      }
+    },
+    "Shared connection settings. Configuring a service does not enable translation or another AI feature." : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "共用连接设置。配置服务不会开启翻译或其他 AI 功能。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "共用連線設定。設定服務不會啟用翻譯或其他 AI 功能。"
+          }
+        }
+      }
+    },
+    "Translation prompt…" : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "翻译提示词…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "翻譯提示詞…"
+          }
+        }
+      }
+    },
+    "Configure AI service…" : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配置 AI 服务…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定 AI 服務…"
+          }
+        }
+      }
+    },
+    "AI service" : {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 服务"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 服務"
+          }
+        }
+      }
+    },
     "-%@" : {
       "extractionState" : "stale",
       "localizations" : {

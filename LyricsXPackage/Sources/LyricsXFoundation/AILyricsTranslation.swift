@@ -84,11 +84,11 @@ public struct AILyricsTranslationParsedResult: Equatable {
 public enum AILyricsTranslationPolicy {
     private static let maximumEndpointBytes = 4_096
     private static let maximumModelBytes = 256
-    private static let maximumPromptBytes = 32_768
+    public static let maximumPromptBytes = 32_768
     private static let maximumTranslationBytes = 16_384
 
-    public static let defaultEndpoint = "https://api.openai.com/v1/chat/completions"
-    public static let defaultModel = "gpt-4o-mini"
+    public static let defaultEndpoint = AIConnectionPolicy.defaultEndpoint
+    public static let defaultModel = AIConnectionPolicy.defaultModel
     public static let defaultTargetLanguage = "zh-Hans"
     public static let defaultPrompt = """
     Translate every lyric line into $targetLanguage, one output line per input line.
@@ -161,28 +161,11 @@ public enum AILyricsTranslationPolicy {
     /// other OpenAI-compatible servers still know only the old name, so the new
     /// one goes to OpenAI's own host alone.
     public static func usesMaxCompletionTokens(at endpoint: URL) -> Bool {
-        endpoint.host?.lowercased() == "api.openai.com"
+        AIConnectionPolicy.usesMaxCompletionTokens(at: endpoint)
     }
 
-    /// A canonical origin used to bind a credential to the server that may receive it.
-    /// Paths, queries, fragments, and default ports do not affect the origin.
     public static func endpointOrigin(_ endpoint: URL) -> String? {
-        guard let components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false),
-              let scheme = components.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              let host = components.host?.lowercased(),
-              !host.isEmpty else {
-            return nil
-        }
-
-        let unwrappedHost = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        let serializedHost = unwrappedHost.contains(":") ? "[\(unwrappedHost)]" : unwrappedHost
-        let port = components.port
-        let isDefaultPort = (scheme == "https" && port == 443) || (scheme == "http" && port == 80)
-        if let port, !isDefaultPort {
-            return "\(scheme)://\(serializedHost):\(port)"
-        }
-        return "\(scheme)://\(serializedHost)"
+        AIConnectionPolicy.endpointOrigin(endpoint)
     }
 
     private struct TranslationResponse: Decodable {
@@ -195,94 +178,17 @@ public enum AILyricsTranslationPolicy {
     }
 
     public static func validatedEndpoint(_ endpoint: String) throws -> URL {
-        let endpoint = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard endpoint.utf8.count <= maximumEndpointBytes else {
-            throw AILyricsTranslationError.configurationTooLarge
-        }
-        guard let components = URLComponents(string: endpoint),
-              let url = components.url,
-              components.host != nil,
-              components.user == nil,
-              components.password == nil,
-              components.fragment == nil else {
-            throw AILyricsTranslationError.invalidEndpoint
-        }
-
-        if components.queryItems?.contains(where: {
-            isCredentialQueryName($0.name)
-        }) == true {
-            throw AILyricsTranslationError.invalidEndpoint
-        }
-
-        let scheme = components.scheme?.lowercased()
-        if scheme != "https" {
-            guard scheme == "http",
-                  let host = components.host?.lowercased(),
-                  isLoopbackHost(host) else {
-                throw AILyricsTranslationError.insecureEndpoint
+        do {
+            return try AIConnectionPolicy.validatedEndpoint(endpoint)
+        } catch let error as AIConnectionError {
+            switch error {
+            case .invalidEndpoint: throw AILyricsTranslationError.invalidEndpoint
+            case .insecureEndpoint: throw AILyricsTranslationError.insecureEndpoint
+            case .configurationTooLarge: throw AILyricsTranslationError.configurationTooLarge
+            case .missingModel: throw AILyricsTranslationError.missingModel
+            case .invalidResponse: throw AILyricsTranslationError.invalidResponse
             }
         }
-        return appendingChatCompletionsPathIfBase(url)
-    }
-
-    /// Completes an endpoint that was given as a base URL.
-    ///
-    /// Providers document a `base_url`, and copying that out of the docs is the
-    /// obvious thing to do: `https://api.deepseek.com` and
-    /// `https://api.deepseek.com/v1` are both base URLs, both look finished, and
-    /// both answer a request to them with a 404 that says nothing about the
-    /// missing path. Nothing on this side can recover from that except the
-    /// rewrite itself, so the shapes that are unambiguously a base get the
-    /// chat-completions path appended.
-    ///
-    /// Anything else is left exactly as given. A proxy, or a provider that
-    /// answers somewhere of its own choosing, is not ours to correct.
-    private static func appendingChatCompletionsPathIfBase(_ url: URL) -> URL {
-        let path = url.path
-        guard ["", "/", "/v1", "/v1/"].contains(path),
-              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
-            return url
-        }
-        let base = path.hasSuffix("/") ? String(path.dropLast()) : path
-        components.path = base + "/chat/completions"
-        return components.url ?? url
-    }
-
-    /// Whether `host` names the loopback interface.
-    ///
-    /// The address decides, not the spelling: `URLComponents.host` keeps an
-    /// IPv6 literal in its brackets, so `[::1]` never compares equal to `::1`,
-    /// and the same host can also turn up pointlessly bracketed. Comparing
-    /// strings gets one of those wrong either way; `[0:0:0:0:0:0:0:1]` and
-    /// `[127.0.0.1]` name the same interfaces as their plain spellings.
-    private static func isLoopbackHost(_ host: String) -> Bool {
-        let literal = host.hasPrefix("[") && host.hasSuffix("]")
-            ? String(host.dropFirst().dropLast())
-            : host
-        if literal == "localhost" {
-            return true
-        }
-
-        var ipv4 = in_addr()
-        if literal.withCString({ inet_pton(AF_INET, $0, &ipv4) }) == 1 {
-            // 127.0.0.0/8 is reserved for loopback.
-            return withUnsafeBytes(of: ipv4) { $0[0] == 127 }
-        }
-
-        var ipv6 = in6_addr()
-        guard literal.withCString({ inet_pton(AF_INET6, $0, &ipv6) }) == 1 else {
-            return false
-        }
-        let bytes = withUnsafeBytes(of: ipv6) { [UInt8]($0) }
-        // `::1`
-        if bytes.dropLast().allSatisfy({ $0 == 0 }), bytes.last == 1 {
-            return true
-        }
-        // `::ffff:127.0.0.1` — a v4-mapped loopback reaches the same interface.
-        return bytes[0 ..< 10].allSatisfy { $0 == 0 }
-            && bytes[10] == 0xff
-            && bytes[11] == 0xff
-            && bytes[12] == 127
     }
 
     public static func configuration(
@@ -677,20 +583,6 @@ public enum AILyricsTranslationPolicy {
         isASCIILetter(scalar) || isASCIIDigit(scalar)
     }
 
-    private static func isCredentialQueryName(_ name: String) -> Bool {
-        let lowercaseName = name.lowercased()
-        let components = lowercaseName.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
-        let compactName = components.joined()
-        let credentialComponents: Set<Substring> = [
-            "auth", "authorization", "bearer", "credential", "key", "password", "passwd", "secret", "sig",
-            "signature", "token",
-        ]
-        let credentialNames: Set<String> = [
-            "apikey", "accesstoken", "authtoken", "bearertoken", "clientsecret", "subscriptionkey",
-        ]
-        return components.contains(where: credentialComponents.contains) || credentialNames.contains(compactName)
-    }
-
     private static func strippingMarkdownFence(from response: String) -> String {
         let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
         let fence = "\u{0060}\u{0060}\u{0060}"
@@ -725,6 +617,7 @@ public struct OpenAICompatibleChatRequest: Encodable, Equatable, Sendable {
     public let model: String
     public let messages: [Message]
     private let maxTokens: Int
+    public var outputTokenLimit: Int { maxTokens }
     /// Whether `maxTokens` goes out as `max_completion_tokens`; see
     /// `AILyricsTranslationPolicy.usesMaxCompletionTokens(at:)`.
     private let usesMaxCompletionTokens: Bool
@@ -750,6 +643,18 @@ public struct OpenAICompatibleChatRequest: Encodable, Equatable, Sendable {
         try container.encode(responseFormat, forKey: .responseFormat)
     }
 
+    /// Generic JSON-mode chat request. Feature adapters build their own messages.
+    public init(
+        configuration: AIConnectionSnapshot,
+        messages: [Message],
+        maxTokens: Int = OpenAICompatibleChatRequest.defaultMaxTokens
+    ) {
+        model = configuration.model
+        self.maxTokens = maxTokens
+        usesMaxCompletionTokens = AIConnectionPolicy.usesMaxCompletionTokens(at: configuration.endpoint)
+        self.messages = messages
+    }
+
     public init(
         configuration: AILyricsTranslationConfiguration,
         sourceLanguage: String?,
@@ -758,7 +663,7 @@ public struct OpenAICompatibleChatRequest: Encodable, Equatable, Sendable {
     ) throws {
         model = configuration.model
         self.maxTokens = maxTokens
-        usesMaxCompletionTokens = AILyricsTranslationPolicy.usesMaxCompletionTokens(at: configuration.endpoint)
+        usesMaxCompletionTokens = AIConnectionPolicy.usesMaxCompletionTokens(at: configuration.endpoint)
         messages = [
             Message(role: "system", content: AILyricsTranslationPolicy.systemPrompt),
             Message(
@@ -775,23 +680,12 @@ public struct OpenAICompatibleChatRequest: Encodable, Equatable, Sendable {
 }
 
 public enum OpenAICompatibleChatResponse {
-    private struct Response: Decodable {
-        struct Choice: Decodable {
-            struct Message: Decodable {
-                let content: String
-            }
-
-            let message: Message
-        }
-
-        let choices: [Choice]
-    }
-
     public static func content(from data: Data) throws -> String {
-        guard let content = try? JSONDecoder().decode(Response.self, from: data).choices.first?.message.content,
-              !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        do {
+            return try AIChatResponsePolicy.content(from: data)
+        } catch {
+            // Existing translation callers/tests keep their public error contract.
             throw AILyricsTranslationError.invalidResponse
         }
-        return content
     }
 }

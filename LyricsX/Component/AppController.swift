@@ -243,6 +243,7 @@ final class AppController: NSObject {
         defaults.publisher(for: [
             .lyricsTranslationEngine,
             .aiLyricsTranslationEnabled,
+            .aiBackend,
             .aiLyricsTranslationEndpoint,
             .aiLyricsTranslationModel,
             .lyricsTranslationTargetLanguage,
@@ -630,7 +631,7 @@ final class AppController: NSObject {
     /// What one translation run is asked to do, read from the preferences.
     /// Two equal requests translate the same lyrics the same way.
     private enum LyricsTranslationRequest: Equatable {
-        case ai(AILyricsTranslationConfiguration)
+        case ai(AIProviderTranslationConfiguration)
         case system(targetLanguage: String)
 
         var targetLanguage: String {
@@ -647,13 +648,14 @@ final class AppController: NSObject {
         var settingsKey: String {
             switch self {
             case .ai(let configuration):
-                return [
-                    "ai",
-                    configuration.endpoint.absoluteString,
-                    configuration.model,
-                    configuration.targetLanguage,
-                    configuration.prompt,
-                ].joined(separator: "|")
+                let providerKey: [String]
+                switch configuration.provider {
+                case .openAICompatible(let connection):
+                    providerKey = ["openAICompatible", connection.endpoint.absoluteString, connection.model]
+                case .appleLocal:
+                    providerKey = ["appleLocal"]
+                }
+                return (["ai"] + providerKey + [configuration.targetLanguage, configuration.prompt]).joined(separator: "|")
             case .system(let targetLanguage):
                 return ["system", targetLanguage].joined(separator: "|")
             }
@@ -679,9 +681,9 @@ final class AppController: NSObject {
         case .off:
             return nil
         case .ai:
+            let provider = try AIController.shared.providerConfiguration
             return .ai(try AILyricsTranslationPolicy.configuration(
-                endpoint: defaults[.aiLyricsTranslationEndpoint],
-                model: defaults[.aiLyricsTranslationModel],
+                provider: provider,
                 targetLanguage: targetLanguage,
                 // Passed raw: `configuration(...)` resolves it, so an untouched
                 // prompt still reaches the endpoint as the current default.
@@ -764,16 +766,16 @@ final class AppController: NSObject {
     private func aiLyricsTranslationAPIKey(for endpoint: URL) async -> String? {
         for attempt in 0 ..< 3 {
             do {
-                let apiKey = try AILyricsTranslationCredentialStore.apiKey(for: endpoint)
+                let apiKey = try AICredentialStore.apiKey(for: endpoint)
                 guard !Task.isCancelled else { return nil }
                 if apiKey == nil {
                     defaults[.lyricsTranslationStatus] = NSLocalizedString(
-                        "Add an API key in AI translation settings.",
+                        "Add an API key in AI service settings.",
                         comment: "Status shown when no API key is stored for AI lyric translation."
                     )
                 }
                 return apiKey
-            } catch let error as AILyricsTranslationCredentialError where error.isTransient {
+            } catch let error as AICredentialError where error.isTransient {
                 guard attempt < 2 else {
                     guard !Task.isCancelled else { return nil }
                     defaults[.lyricsTranslationStatus] = NSLocalizedString(
@@ -842,8 +844,13 @@ final class AppController: NSObject {
         }
         switch request {
         case .ai(let configuration):
-            guard let apiKey = await aiLyricsTranslationAPIKey(for: configuration.endpoint) else {
-                return nil
+            let apiKey: String?
+            switch configuration.provider {
+            case .openAICompatible(let connection):
+                guard let key = await aiLyricsTranslationAPIKey(for: connection.endpoint) else { return nil }
+                apiKey = key
+            case .appleLocal:
+                apiKey = nil
             }
             let result = try await aiLyricsTranslator.translate(
                 lyrics: lyrics,
@@ -938,7 +945,7 @@ final class AppController: NSObject {
         // one that costs money. System translation runs on this Mac in a
         // moment, and a result for lyrics replaced meanwhile is dropped by the
         // check below like any other that arrives too late.
-        if case .ai = request {
+        if case .ai(let configuration) = request, case .openAICompatible = configuration.provider {
             // The key stays unrecorded while this waits, so the next call goes
             // ahead.
             switch automaticLyricsReplacementWindow.translationStart(at: Date()) {

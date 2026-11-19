@@ -233,6 +233,8 @@ extension UserDefaults.DefaultsKeys {
     // when AI translation was the only one, and are kept so no value is lost.
     static let lyricsTranslationTargetLanguage = Key<String>("AILyricsTranslationTargetLanguage")
     static let lyricsTranslationStatus = Key<String>("AILyricsTranslationStatus")
+    static let aiServiceStatus = Key<String>("AIServiceStatus")
+    static let aiBackend = Key<String?>("AIBackend")
 
     static let globalLyricsOffset = Key<Int>("GlobalLyricsOffset")
     /// `PlaybackRouteLyricsOffsets.storedData`: the offsets set per player and
